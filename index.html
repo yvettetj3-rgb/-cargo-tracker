@@ -61,32 +61,22 @@
             margin-bottom: 10px;
             color: var(--tg-theme-button-color, #2481cc);
         }
-        .description {
-            font-size: 16px;
-            margin-bottom: 20px;
-        }
+        .description { font-size: 16px; margin-bottom: 20px; }
         .timeline { position: relative; padding-left: 30px; }
         .timeline::before {
             content: '';
             position: absolute;
-            left: 8px;
-            top: 8px;
-            bottom: 8px;
+            left: 8px; top: 8px; bottom: 8px;
             width: 2px;
             background: var(--tg-theme-hint-color, #ddd);
         }
-        .timeline-item {
-            position: relative;
-            padding-bottom: 20px;
-        }
+        .timeline-item { position: relative; padding-bottom: 20px; }
         .timeline-item:last-child { padding-bottom: 0; }
         .timeline-item::before {
             content: '';
             position: absolute;
-            left: -26px;
-            top: 4px;
-            width: 12px;
-            height: 12px;
+            left: -26px; top: 4px;
+            width: 12px; height: 12px;
             border-radius: 50%;
             background: var(--tg-theme-hint-color, #ddd);
             border: 2px solid var(--tg-theme-bg-color, #fff);
@@ -108,9 +98,9 @@
             padding: 16px;
             border-radius: 12px;
             text-align: center;
+            margin-bottom: 20px;
         }
         .error.show { display: block; }
-        .not-found { text-align: center; padding: 40px; color: var(--tg-theme-hint-color, #999); }
     </style>
 </head>
 <body>
@@ -122,10 +112,10 @@
 
         <div class="search-box">
             <input type="text" id="trackInput" placeholder="Например: TJ001" maxlength="20">
-            <button onclick="track()">Отследить</button>
+            <button id="trackBtn" onclick="track()">Отследить</button>
         </div>
 
-        <div class="error" id="error">Посылка не найдена. Проверьте номер.</div>
+        <div class="error" id="error"></div>
 
         <div class="result" id="result">
             <div class="track-code" id="rCode"></div>
@@ -135,17 +125,24 @@
     </div>
 
     <script>
-        // Инициализация Telegram Mini App
-        const tg = window.Telegram.WebApp;
-        tg.expand();
-        tg.ready();
+        // БЕЗОПАСНАЯ инициализация Telegram (работает и в браузере, и в ТГ)
+        let tg = null;
+        if (window.Telegram && window.Telegram.WebApp) {
+            tg = window.Telegram.WebApp;
+            try { tg.expand(); tg.ready(); } catch(e) {}
+        }
 
-        // Подключение к Supabase (ваши ключи уже встроены!)
+        // Подключение к Supabase
         const supabaseUrl = 'https://tlhsitnslofpunjkgycl.supabase.co';
         const supabaseKey = 'sb_publishable_gQdzylvYIMSSjam1AemmoQ_X844LaV9';
-        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
 
-        // Статусы с переводом
+        let supabase = null;
+        try {
+            supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+        } catch(e) {
+            showError('Не удалось подключиться к базе. Проверьте интернет.');
+        }
+
         const statusNames = {
             'registered': 'Оформлен',
             'purchased': 'Выкуплен в Китае',
@@ -157,70 +154,68 @@
         };
         const statusOrder = ['registered', 'purchased', 'shipped', 'in_transit', 'arrived', 'ready', 'delivered'];
 
+        function showError(msg) {
+            const err = document.getElementById('error');
+            err.textContent = msg;
+            err.classList.add('show');
+            document.getElementById('result').classList.remove('show');
+        }
+
         async function track() {
             const code = document.getElementById('trackInput').value.trim().toUpperCase();
             if (!code) return;
 
-            // Показываем загрузку
-            tg.MainButton.setText('Поиск...');
-            tg.MainButton.show();
+            const btn = document.getElementById('trackBtn');
+            btn.textContent = 'Поиск...';
+            btn.disabled = true;
 
-            // Ищем в базе
-            const { data, error } = await supabase
-                .from('parcels')
-                .select('*')
-                .eq('track_code', code)
-                .single();
+            try {
+                const { data, error } = await supabase
+                    .from('parcels')
+                    .select('*')
+                    .eq('track_code', code)
+                    .single();
 
-            tg.MainButton.hide();
+                document.getElementById('error').classList.remove('show');
 
-            if (error || !data) {
-                document.getElementById('error').classList.add('show');
-                document.getElementById('result').classList.remove('show');
-                return;
+                if (error || !data) {
+                    showError('Посылка не найдена. Проверьте номер.');
+                } else {
+                    document.getElementById('result').classList.add('show');
+                    document.getElementById('rCode').textContent = data.track_code;
+                    document.getElementById('rDesc').textContent = data.description || '';
+
+                    const currentIndex = statusOrder.indexOf(data.status);
+                    const timeline = document.getElementById('timeline');
+                    timeline.innerHTML = '';
+
+                    statusOrder.forEach((status, index) => {
+                        const item = document.createElement('div');
+                        item.className = 'timeline-item';
+                        if (index < currentIndex) item.classList.add('active');
+                        if (index === currentIndex) item.classList.add('current');
+                        if (index > currentIndex) item.style.opacity = '0.4';
+
+                        const date = index === currentIndex
+                            ? new Date(data.updated_at).toLocaleString('ru-RU')
+                            : '';
+
+                        item.innerHTML = '<div class="status-name">' + statusNames[status] + '</div><div class="status-date">' + date + '</div>';
+                        timeline.appendChild(item);
+                    });
+                }
+            } catch (e) {
+                showError('Ошибка соединения. Попробуйте ещё раз.');
             }
 
-            // Показываем результат
-            document.getElementById('error').classList.remove('show');
-            document.getElementById('result').classList.add('show');
-            document.getElementById('rCode').textContent = data.track_code;
-            document.getElementById('rDesc').textContent = data.description || '';
-
-            // Рисуем таймлайн
-            const currentIndex = statusOrder.indexOf(data.status);
-            const timeline = document.getElementById('timeline');
-            timeline.innerHTML = '';
-
-            statusOrder.forEach((status, index) => {
-                const item = document.createElement('div');
-                item.className = 'timeline-item';
-                if (index < currentIndex) item.classList.add('active');
-                if (index === currentIndex) item.classList.add('current');
-                if (index > currentIndex) item.style.opacity = '0.4';
-
-                const date = index === currentIndex 
-                    ? new Date(data.updated_at).toLocaleString('ru-RU')
-                    : '';
-
-                item.innerHTML = `
-                    <div class="status-name">${statusNames[status]}</div>
-                    <div class="status-date">${date}</div>
-                `;
-                timeline.appendChild(item);
-            });
-
-            // Показываем кнопку "Поделиться" внизу
-            tg.MainButton.setText('Скопировать результат');
-            tg.MainButton.onClick(() => {
-                tg.sendData(JSON.stringify({code: data.track_code, status: statusNames[data.status]}));
-            });
-            tg.MainButton.show();
+            btn.textContent = 'Отследить';
+            btn.disabled = false;
         }
 
-        // Отслеживание по Enter
         document.getElementById('trackInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') track();
         });
     </script>
 </body>
 </html>
+
